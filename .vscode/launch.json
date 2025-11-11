@@ -1,0 +1,13 @@
+{
+    "configurations": [
+        {
+            "name": "new_tairg",
+            "cwd": "${workspaceRoot}",
+            "executable": "/home/jns/hwid0-firmware/build/new_tairg.elf",
+            "request": "attach",
+            "type": "cortex-debug",
+            "servertype": "stutil",
+            "v1": false
+        }
+    ]
+}

@@ -1,0 +1,9 @@
+[submodule "LIB"]
+	path = LIB
+	url = https://github.com/un7pcs/LIB.git
+[submodule "json"]
+	path = json
+	url = https://github.com/nlohmann/json.git
+[submodule "cubemx.cmake"]
+	path = cubemx.cmake
+	url = https://github.com/un7pcs/cubemx.cmake.git

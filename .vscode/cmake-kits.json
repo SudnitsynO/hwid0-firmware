@@ -1,0 +1,6 @@
+[
+    {
+        "name": "STM32",
+        "toolchainFile": "${workspaceRoot}/cubemx.cmake/arm-gcc.cmake"
+    }
+]

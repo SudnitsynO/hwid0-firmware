@@ -1,0 +1,284 @@
+/************************************************************
+ *					CC1101 library
+ *	Author: UN7PCS
+ *	Date: 2022
+ *  1) Настроить конфигурацию трансивера по шаблону xml
+ *  2) передать конфиг в rf_init
+ *
+ ************************************************************/
+#pragma once
+//#include "cmsis_os.h"
+#include "delay.h"
+#include "gpio_interface.h"
+//#include "portmacro.h"
+//#include <cmath>
+//#include <cstdint>
+//#include <utility>
+#include <array>
+#include "software_timer_interface.h"
+
+
+template <class MOSI, class MISO, class SCLK, class CS> class CC1101
+{
+  public:
+    enum class Commands : uint8_t
+    {
+        SRES = 0x30,    // Chip Reset
+        SFSTXON = 0x31, // Enable and calibrate frequency synthesizer
+        SXOFF = 0x32,   // Turn Off OSC
+        SCAL = 0x33,    // Calibrate frequency synthesizer
+        SRX = 0x34,     // Enable RX
+        STX = 0x35,     // Enable TX
+        SIDLE = 0x36,   // Exit RX/TX, go in idle mode
+        SWOR = 0x38,    // Start automatic polling sequence
+        SPWD = 0x39,    // Enter power down mode
+        SFRX = 0x3A,    // Flush RX FIFO
+        SFTX = 0x3B,    // Flush TX FIFO
+        SWORRST = 0x3C, // Reset real time clock
+        SNOP = 0x3D,    // no operation
+        MARCSTATE = 0x35
+    };
+
+    // CC1101();
+
+    typedef std::pair<uint16_t, uint8_t> RegValue;
+
+    /**
+     * @brief Производит инициализацию радиомодуля
+     * 
+     * @param register_list массив значений регистров сгенерированых SmartRF Studio
+     *
+     * @param count количество регистров в массиве
+     */
+    void rf_init(RegValue * register_list, size_t count); 
+    /**
+     * @brief Ожидает завершения операций с трансивером
+     *        средствами FreeRTOS 
+     */
+    void wait_for_idle();
+    /**
+     * @brief Передаст содержимое буфера по радио
+     * 
+     * @param timeout таймаут в ms
+     * @return true операция выполнена успешно
+     * @return false прервано по таймауту
+     */
+    bool rx_buf(uint32_t timeout);
+    /**
+     * @brief Запускает прием данных и ожидает поступления пакета
+     * 
+     * @param timeout таймаут в ms
+     * @return true операция выполнена успешно
+     * @return false прервано по таймауту
+     */
+    bool tx_buf(uint32_t timeout);
+
+    /**
+     * @brief Значение RSSI в dbm посленднего принятого пакета
+     */
+    float RSSI = NAN;
+    /**
+     * @brief Значение LIQ в dbm посленднего принятого пакета
+     */
+    uint8_t LIQ = 0;
+    /**
+     * @brief длинна посленднего принятого пакета
+     */
+    int data_len = 0;
+    /**
+     * @brief данные посленднего принятого пакета
+     */
+    uint8_t buffer[64] = {};
+
+  public:
+    bool wait_miso(uint32_t timeout);               //ожидает падения MISO средствами freertos
+    uint8_t send_byte(uint8_t byte);                //отправит байт на микросхему
+    void write_reg(uint16_t addr, uint8_t data);    //запишет регистр в трансивер
+    uint8_t read_reg(uint16_t addr);                //читает регистр из трансивера
+    void send_cmd(Commands cmd);                    //отправит однобайтную команду на трансивер
+    void miso_falling_isr();                        //обработчик прерывания MISO
+
+    uint8_t state = 0;
+    long int freqest = 0;
+    // IRQn_Type _miso_irqn;
+    //SemaphoreHandle_t miso_falling_semaphore;       //семафор freertos для обработки
+};
+
+template <class MOSI, class MISO, class SCLK, class CS> bool CC1101<MOSI, MISO, SCLK, CS>::wait_miso(uint32_t timeout)
+{
+    // HAL_NVIC_EnableIRQ(_miso_irqn);
+    //  PC3::Set();
+    MISO::SetInterrupt(InterruptMode::FallingEdge);
+    ExtiIsr &dlg = MISO::GetIsrDelegate();
+    dlg.init<CC1101<MOSI, MISO, SCLK, CS>, &CC1101<MOSI, MISO, SCLK, CS>::miso_falling_isr>(this);
+    xSemaphoreTake(miso_falling_semaphore, 0);      //TODO: проверить
+    const bool r = xSemaphoreTake(miso_falling_semaphore, timeout) == pdTRUE;
+    MISO::DisableInterrupt();
+    // HAL_NVIC_DisableIRQ(_miso_irqn);
+    //  PC3::Reset();
+    return r;
+}
+
+template <class MOSI, class MISO, class SCLK, class CS> uint8_t CC1101<MOSI, MISO, SCLK, CS>::send_byte(uint8_t byte)
+{
+    uint8_t r = 0;
+    for (int i = 7; i >= 0; i--)
+    {
+        MOSI::Write(byte & (1 << i));
+        r = MISO::Read() ? r | (1 << i) : r;
+
+        Delay_us(1);
+        SCLK::Set();
+
+        Delay_us(1);
+        SCLK::Reset();
+
+        Delay_us(1);
+    }
+    return r;
+}
+
+template <class MOSI, class MISO, class SCLK, class CS>
+void CC1101<MOSI, MISO, SCLK, CS>::write_reg(uint16_t addr, uint8_t data)
+{
+    CS::Reset();
+    while (MISO::Read())
+        ; //
+    const uint8_t header = addr;
+    state = send_byte(header);
+    send_byte(data);
+    CS::Set();
+}
+
+template <class MOSI, class MISO, class SCLK, class CS> uint8_t CC1101<MOSI, MISO, SCLK, CS>::read_reg(uint16_t addr)
+{
+    CS::Reset();
+    while (MISO::Read())
+        ; 
+    const uint8_t header = addr | 0x80 | 0x40;
+    state = send_byte(header);
+    const uint8_t data = send_byte(0);
+    CS::Set();
+    return data;
+}
+
+template <class MOSI, class MISO, class SCLK, class CS> void CC1101<MOSI, MISO, SCLK, CS>::send_cmd(Commands cmd)
+{
+    CS::Reset();
+    while (MISO::Read())
+        ;
+    state = send_byte((uint8_t)cmd);
+    CS::Set();
+}
+/*
+template <class MOSI, class MISO, class SCLK, class CS> CC1101<MOSI, MISO, SCLK, CS>::CC1101() : _miso_irqn()
+{
+    miso_falling = xSemaphoreCreateBinary();
+}
+*/
+template <class MOSI, class MISO, class SCLK, class CS>
+void CC1101<MOSI, MISO, SCLK, CS>::rf_init(RegValue * register_list, size_t count)
+{
+    MOSI::Init();
+    MISO::Init();
+    SCLK::Init();
+    CS::Init();
+    MOSI::SetMode(Mode::Output);
+    MISO::SetMode(Mode::Input);
+    SCLK::SetMode(Mode::Output);
+    CS::SetMode(Mode::Output);
+
+    MISO::DisableInterrupt();
+    for (size_t i = 0; i < count; i++)
+    {
+        write_reg(register_list[i].first, register_list[i].second);
+    }
+    //read_reg(0x20);
+}
+
+template <class MOSI, class MISO, class SCLK, class CS> void CC1101<MOSI, MISO, SCLK, CS>::wait_for_idle()
+{
+
+    for (int n = 0; n < 1000; n++)
+    {
+        send_cmd(Commands::SIDLE);
+        if ((state & 0x70) == 0)
+            break;
+        Delay_ms(1);
+    }
+}
+
+template <class MOSI, class MISO, class SCLK, class CS> bool CC1101<MOSI, MISO, SCLK, CS>::rx_buf(uint32_t timeout)
+{
+    data_len = 0;
+    // send_cmd(Commands::SIDLE);
+    wait_for_idle();
+    send_cmd(Commands::SFRX);
+    send_cmd(Commands::SRX);
+    // xSemaphoreTake(miso_falling, 0);
+    if (wait_miso(timeout))
+    {
+        //����� ������
+        int n = read_reg(0x3F); // 3b
+        if ((n > 0))
+        {
+            while ((n != 0) && (data_len < 64))
+            {
+                buffer[data_len] = read_reg(0x3F);
+                data_len++;
+                n--;
+            }
+            const int r = read_reg(0x3F);
+            if (r >= 128)
+            {
+                RSSI = (r - 256) / 2.0 - 74;
+            }
+            else
+            {
+                RSSI = r / 2.0 - 74;
+            }
+            LIQ = read_reg(0x3F);
+            if (LIQ & 0x80)
+            {
+                //	freqest += ReadReg(0x32);
+                //	WriteReg(0x0C, (signed int)(freqest / 100));
+            }
+            LIQ &= 0x7F;
+            send_cmd(Commands::SFRX);
+            send_cmd(Commands::SIDLE);
+            return true;
+        }
+    }
+    send_cmd(Commands::SIDLE);
+    return false;
+}
+
+template <class MOSI, class MISO, class SCLK, class CS> bool CC1101<MOSI, MISO, SCLK, CS>::tx_buf(uint32_t timeout)
+{
+    // send_cmd(Commands::SIDLE);
+    wait_for_idle();
+    send_cmd(Commands::SFRX);
+    send_cmd(Commands::SFTX);
+
+    if (data_len > 50)
+        return false;
+    write_reg(0x3F, data_len);
+    for (int i = 0; i < data_len; i++)
+    {
+        write_reg(0x3F, buffer[i]);
+    }
+    send_cmd(Commands::STX);
+    wait_miso(timeout);
+    send_cmd(Commands::SFTX);
+    send_cmd(Commands::SIDLE);
+    return true;
+}
+
+template <class MOSI, class MISO, class SCLK, class CS> void CC1101<MOSI, MISO, SCLK, CS>::miso_falling_isr()
+{
+    static BaseType_t xHigherPriorityTaskWoken;
+    xHigherPriorityTaskWoken = pdFALSE;
+    xSemaphoreGiveFromISR(miso_falling_semaphore, &xHigherPriorityTaskWoken);
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    MISO::DisableInterrupt();
+}

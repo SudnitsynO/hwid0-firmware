@@ -1,0 +1,3 @@
+truestudio exclude config 
+
+<entry excluding="OneWireF0.cpp|onewirebase.cpp|DS18B20.cpp|DateTime.cpp|usart.cpp|yanisutil.cpp|wh1602.cpp|ui.cpp|usart_hal_freertos.cpp|SystemFlash.cpp|stream.cpp|random.cpp|OneWire.cpp|crc.cpp|CIC.cpp|mutex_freertos.cpp|memory_freertos.cpp|graphic.cpp|ILI9341.cpp|delay_hal.cpp|Format.cpp|fonts.cpp|font5x8.cpp|FlashTranslator.cpp|FlashDrive.cpp|FileSystem.cpp|delay_freertos.cpp|cordic.cpp|CdcStream.cpp|Buffer.cpp|AD7714_PIO.cpp" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="LIB"/>

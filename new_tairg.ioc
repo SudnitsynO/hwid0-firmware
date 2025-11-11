@@ -319,6 +319,7 @@ PE9.Signal=FSMC_D6
 PinOutPanel.RotationAngle=0
 ProjectManager.AskForMigrate=true
 ProjectManager.BackupPrevious=false
+ProjectManager.CompilerLinker=GCC
 ProjectManager.CompilerOptimize=3
 ProjectManager.ComputerToolchain=false
 ProjectManager.CoupleFile=false
